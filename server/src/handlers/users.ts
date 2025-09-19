@@ -1,21 +1,34 @@
+import { db } from '../db';
+import { usersTable } from '../db/schema';
 import { type CreateUserInput, type UpdateUserInput, type User, type PaginatedResponse } from '../schema';
+import { eq, and, or, ilike, count, SQL } from 'drizzle-orm';
+// Using Bun's built-in password hashing
 
 // Create a new user
 export const createUser = async (input: CreateUserInput): Promise<User> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is to create a new user with hashed password.
-  // Should hash the password before storing and return user data without password hash.
-  return Promise.resolve({
-    id: 0, // Placeholder ID
-    username: input.username,
-    name: input.name,
-    email: input.email,
-    password_hash: "", // Should be hashed in real implementation
-    role: input.role,
-    is_active: input.is_active,
-    created_at: new Date(),
-    updated_at: new Date()
-  });
+  try {
+    // Hash the password using Bun
+    const password_hash = await Bun.password.hash(input.password);
+
+    // Insert user record
+    const result = await db.insert(usersTable)
+      .values({
+        username: input.username,
+        name: input.name,
+        email: input.email,
+        password_hash,
+        role: input.role,
+        is_active: input.is_active,
+        updated_at: new Date()
+      })
+      .returning()
+      .execute();
+
+    return result[0];
+  } catch (error) {
+    console.error('User creation failed:', error);
+    throw error;
+  }
 };
 
 // Get all users with pagination and filtering
@@ -26,54 +39,172 @@ export const getUsers = async (filters?: {
   page?: number;
   limit?: number;
 }): Promise<PaginatedResponse<User>> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is to fetch users with search, filtering and pagination.
-  // Should support search by name/username/email, filter by role and active status.
-  return Promise.resolve({
-    data: [],
-    total: 0,
-    page: filters?.page || 1,
-    limit: filters?.limit || 10,
-    total_pages: 0
-  });
+  try {
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 10;
+    const offset = (page - 1) * limit;
+
+    // Build conditions array
+    const conditions: SQL<unknown>[] = [];
+
+    // Search filter - search in name, username, and email
+    if (filters?.search) {
+      const searchTerm = `%${filters.search}%`;
+      conditions.push(
+        or(
+          ilike(usersTable.name, searchTerm),
+          ilike(usersTable.username, searchTerm),
+          ilike(usersTable.email, searchTerm)
+        )!
+      );
+    }
+
+    // Role filter
+    if (filters?.role) {
+      conditions.push(eq(usersTable.role, filters.role));
+    }
+
+    // Active status filter
+    if (filters?.is_active !== undefined) {
+      conditions.push(eq(usersTable.is_active, filters.is_active));
+    }
+
+    // Execute queries with or without conditions
+    let users, totalResult;
+
+    if (conditions.length > 0) {
+      const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
+      
+      [users, totalResult] = await Promise.all([
+        db.select()
+          .from(usersTable)
+          .where(whereClause)
+          .limit(limit)
+          .offset(offset)
+          .execute(),
+        db.select({ count: count() })
+          .from(usersTable)
+          .where(whereClause)
+          .execute()
+      ]);
+    } else {
+      [users, totalResult] = await Promise.all([
+        db.select()
+          .from(usersTable)
+          .limit(limit)
+          .offset(offset)
+          .execute(),
+        db.select({ count: count() })
+          .from(usersTable)
+          .execute()
+      ]);
+    }
+
+    const total = totalResult[0].count;
+    const total_pages = Math.ceil(total / limit);
+
+    return {
+      data: users,
+      total,
+      page,
+      limit,
+      total_pages
+    };
+  } catch (error) {
+    console.error('Users fetch failed:', error);
+    throw error;
+  }
 };
 
 // Get user by ID
 export const getUserById = async (id: number): Promise<User | null> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is to fetch a specific user by ID.
-  return Promise.resolve(null);
+  try {
+    const users = await db.select()
+      .from(usersTable)
+      .where(eq(usersTable.id, id))
+      .execute();
+
+    return users.length > 0 ? users[0] : null;
+  } catch (error) {
+    console.error('User fetch by ID failed:', error);
+    throw error;
+  }
 };
 
 // Update user
 export const updateUser = async (input: UpdateUserInput): Promise<User> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is to update user information.
-  // Should hash password if provided, update timestamp, and return updated user.
-  return Promise.resolve({
-    id: input.id,
-    username: input.username || "placeholder",
-    name: input.name || "placeholder",
-    email: input.email || "placeholder@example.com",
-    password_hash: "",
-    role: input.role || 'pelapor',
-    is_active: input.is_active ?? true,
-    created_at: new Date(),
-    updated_at: new Date()
-  });
+  try {
+    // Build update object
+    const updateData: any = {
+      updated_at: new Date()
+    };
+
+    if (input.username !== undefined) updateData.username = input.username;
+    if (input.name !== undefined) updateData.name = input.name;
+    if (input.email !== undefined) updateData.email = input.email;
+    if (input.role !== undefined) updateData.role = input.role;
+    if (input.is_active !== undefined) updateData.is_active = input.is_active;
+
+    // Hash password if provided
+    if (input.password !== undefined) {
+      updateData.password_hash = await Bun.password.hash(input.password);
+    }
+
+    // Update user record
+    const result = await db.update(usersTable)
+      .set(updateData)
+      .where(eq(usersTable.id, input.id))
+      .returning()
+      .execute();
+
+    if (result.length === 0) {
+      throw new Error(`User with ID ${input.id} not found`);
+    }
+
+    return result[0];
+  } catch (error) {
+    console.error('User update failed:', error);
+    throw error;
+  }
 };
 
 // Delete user (soft delete by setting is_active to false)
 export const deleteUser = async (id: number): Promise<boolean> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is to soft delete a user by setting is_active to false.
-  return Promise.resolve(true);
+  try {
+    const result = await db.update(usersTable)
+      .set({ 
+        is_active: false,
+        updated_at: new Date()
+      })
+      .where(eq(usersTable.id, id))
+      .returning()
+      .execute();
+
+    return result.length > 0;
+  } catch (error) {
+    console.error('User deletion failed:', error);
+    throw error;
+  }
 };
 
 // Reset user password
 export const resetUserPassword = async (id: number, newPassword: string): Promise<boolean> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is to reset user password (admin function).
-  // Should hash the new password and update the user record.
-  return Promise.resolve(true);
+  try {
+    // Hash the new password
+    const password_hash = await Bun.password.hash(newPassword);
+
+    const result = await db.update(usersTable)
+      .set({ 
+        password_hash,
+        updated_at: new Date()
+      })
+      .where(eq(usersTable.id, id))
+      .returning()
+      .execute();
+
+    return result.length > 0;
+  } catch (error) {
+    console.error('Password reset failed:', error);
+    throw error;
+  }
 };

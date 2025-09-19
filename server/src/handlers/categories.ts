@@ -1,60 +1,132 @@
+import { db } from '../db';
+import { categoriesTable, reportsTable } from '../db/schema';
 import { type CreateCategoryInput, type UpdateCategoryInput, type Category } from '../schema';
+import { eq, count } from 'drizzle-orm';
 
 // Create a new category
 export const createCategory = async (input: CreateCategoryInput): Promise<Category> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is to create a new issue category.
-  return Promise.resolve({
-    id: 0, // Placeholder ID
-    name: input.name,
-    description: input.description,
-    is_active: input.is_active,
-    created_at: new Date(),
-    updated_at: new Date()
-  });
+  try {
+    const result = await db.insert(categoriesTable)
+      .values({
+        name: input.name,
+        description: input.description,
+        is_active: input.is_active
+      })
+      .returning()
+      .execute();
+
+    return result[0];
+  } catch (error) {
+    console.error('Category creation failed:', error);
+    throw error;
+  }
 };
 
 // Get all active categories
 export const getCategories = async (): Promise<Category[]> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is to fetch all active categories.
-  // Should filter by is_active = true for regular users.
-  return Promise.resolve([]);
+  try {
+    const result = await db.select()
+      .from(categoriesTable)
+      .where(eq(categoriesTable.is_active, true))
+      .execute();
+
+    return result;
+  } catch (error) {
+    console.error('Failed to fetch active categories:', error);
+    throw error;
+  }
 };
 
 // Get all categories (admin view)
 export const getAllCategories = async (): Promise<Category[]> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is to fetch all categories including inactive ones (admin only).
-  return Promise.resolve([]);
+  try {
+    const result = await db.select()
+      .from(categoriesTable)
+      .execute();
+
+    return result;
+  } catch (error) {
+    console.error('Failed to fetch all categories:', error);
+    throw error;
+  }
 };
 
 // Get category by ID
 export const getCategoryById = async (id: number): Promise<Category | null> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is to fetch a specific category by ID.
-  return Promise.resolve(null);
+  try {
+    const result = await db.select()
+      .from(categoriesTable)
+      .where(eq(categoriesTable.id, id))
+      .execute();
+
+    return result[0] || null;
+  } catch (error) {
+    console.error('Failed to fetch category by ID:', error);
+    throw error;
+  }
 };
 
 // Update category
 export const updateCategory = async (input: UpdateCategoryInput): Promise<Category> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is to update category information.
-  // Should update the updated_at timestamp.
-  return Promise.resolve({
-    id: input.id,
-    name: input.name || "placeholder",
-    description: input.description || null,
-    is_active: input.is_active ?? true,
-    created_at: new Date(),
-    updated_at: new Date()
-  });
+  try {
+    // Prepare update data - only include fields that were provided
+    const updateData: Partial<typeof categoriesTable.$inferInsert> = {
+      updated_at: new Date()
+    };
+
+    if (input.name !== undefined) {
+      updateData.name = input.name;
+    }
+    if (input.description !== undefined) {
+      updateData.description = input.description;
+    }
+    if (input.is_active !== undefined) {
+      updateData.is_active = input.is_active;
+    }
+
+    const result = await db.update(categoriesTable)
+      .set(updateData)
+      .where(eq(categoriesTable.id, input.id))
+      .returning()
+      .execute();
+
+    if (result.length === 0) {
+      throw new Error('Category not found');
+    }
+
+    return result[0];
+  } catch (error) {
+    console.error('Category update failed:', error);
+    throw error;
+  }
 };
 
 // Delete category (soft delete)
 export const deleteCategory = async (id: number): Promise<boolean> => {
-  // This is a placeholder declaration! Real code should be implemented here.
-  // The goal of this handler is to soft delete a category by setting is_active to false.
-  // Should check if category is being used by any reports before deletion.
-  return Promise.resolve(true);
+  try {
+    // First check if category is being used by any reports
+    const reportCount = await db.select({ count: count() })
+      .from(reportsTable)
+      .where(eq(reportsTable.category_id, id))
+      .execute();
+
+    if (reportCount[0].count > 0) {
+      throw new Error('Cannot delete category that is being used by reports');
+    }
+
+    // Perform soft delete by setting is_active to false
+    const result = await db.update(categoriesTable)
+      .set({ 
+        is_active: false,
+        updated_at: new Date()
+      })
+      .where(eq(categoriesTable.id, id))
+      .returning()
+      .execute();
+
+    return result.length > 0;
+  } catch (error) {
+    console.error('Category deletion failed:', error);
+    throw error;
+  }
 };
